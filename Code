@@ -1,0 +1,213 @@
+#include <Adafruit_GFX.h>      //Libraries for the OLED and BMP280
+#include <Adafruit_SSD1306.h>
+
+
+#define SCREEN_WIDTH 128 // OLED display width, in pixels
+#define SCREEN_HEIGHT 64 // OLED display height, in pixels
+#define OLED_RESET    LED_BUILTIN // Reset pin # (or -1 if sharing Arduino reset pin)
+
+
+Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, OLED_RESET); //Declaring the display name (display)
+
+#include "Wire.h" // This library allows you to communicate with I2C devices.
+const int MPU_ADDR = 0x68; // I2C address of the MPU-6050. If AD0 pin is set to HIGH, the I2C address will be 0x69.
+int16_t accelerometer_x, accelerometer_y, accelerometer_z; // variables for accelerometer raw data
+int16_t gyro_x, gyro_y, gyro_z; // variables for gyro raw data
+int16_t temperature; // variables for temperature data
+
+#define LED_TL 32
+#define LED_TR 23
+#define LED_BL 13
+#define LED_BR 15
+
+char tmp_str[7]; // temporary variable used in convert function
+char* convert_int16_to_str(int16_t i) { // converts int16 to string. Moreover, resulting strings will have the same length in the debug monitor.
+  sprintf(tmp_str, "%6d", i);
+  return tmp_str;
+}
+
+#define BLYNK_PRINT Serial
+
+#include <WiFi.h>
+#include <WiFiClient.h>
+#include <BlynkSimpleEsp32.h>
+
+// You should get Auth Token in the Blynk App.
+// Go to the Project Settings (nut icon).
+char auth[] = "CH84ThAxaFtTGsWoXQiwHF0wRhHLhQvd";
+
+// Your WiFi credentials.
+// Set password to "" for open networks.
+char ssid[] = "telenet-22732";
+char pass[] = "W6vNymfrCRvj";
+
+
+void setup() {
+  pinMode(15, OUTPUT);
+  pinMode(15, HIGH);
+
+  pinMode(23, OUTPUT);
+  pinMode(23, HIGH);
+
+  pinMode(32, OUTPUT);
+  pinMode(32, HIGH);
+
+  pinMode(13, OUTPUT);
+  pinMode(13, HIGH);
+  Serial.begin(115200);
+
+  delay(10);
+  Serial.print("Connecting to ");
+  Serial.println(ssid);
+
+  WiFi.begin(ssid, pass);
+  int wifi_ctr = 0;
+  while (WiFi.status() != WL_CONNECTED) {
+    delay(500);
+    Serial.print(".");
+  }
+
+  Serial.println("WiFi connected");
+
+  Blynk.begin("CH84ThAxaFtTGsWoXQiwHF0wRhHLhQvd", ssid, pass);
+
+
+
+  Serial.begin(115200);
+  pinMode(LED_TL, OUTPUT);
+  pinMode(LED_TR, OUTPUT);
+  pinMode(LED_BL, OUTPUT);
+  pinMode(LED_BR, OUTPUT);
+  Wire.begin();
+  Wire.beginTransmission(MPU_ADDR); // Begins a transmission to the I2C slave (GY-521 board)
+  Wire.write(0x6B); // PWR_MGMT_1 register
+  Wire.write(0); // set to zero (wakes up the MPU-6050)
+  Wire.endTransmission(true);
+
+  display.begin(SSD1306_SWITCHCAPVCC, 0x3C); //Start the OLED display
+  display.clearDisplay();
+  display.display();
+  display.setTextColor(WHITE);
+  display.setTextSize(3);
+}
+void loop() {
+  Wire.beginTransmission(MPU_ADDR);
+  Wire.write(0x3B); // starting with register 0x3B (ACCEL_XOUT_H) [MPU-6000 and MPU-6050 Register Map and Descriptions Revision 4.2, p.40]
+  Wire.endTransmission(false); // the parameter indicates that the Arduino will send a restart. As a result, the connection is kept active.
+  Wire.requestFrom(MPU_ADDR, 7 * 2, true); // request a total of 7*2=14 registers
+
+  // "Wire.read()<<8 | Wire.read();" means two registers are read and stored in the same variable
+  accelerometer_x = Wire.read() << 8 | Wire.read(); // reading registers: 0x3B (ACCEL_XOUT_H) and 0x3C (ACCEL_XOUT_L)
+  accelerometer_y = Wire.read() << 8 | Wire.read(); // reading registers: 0x3D (ACCEL_YOUT_H) and 0x3E (ACCEL_YOUT_L)
+  accelerometer_z = Wire.read() << 8 | Wire.read(); // reading registers: 0x3F (ACCEL_ZOUT_H) and 0x40 (ACCEL_ZOUT_L)
+  temperature = Wire.read() << 8 | Wire.read(); // reading registers: 0x41 (TEMP_OUT_H) and 0x42 (TEMP_OUT_L)
+  gyro_x = Wire.read() << 8 | Wire.read(); // reading registers: 0x43 (GYRO_XOUT_H) and 0x44 (GYRO_XOUT_L)
+  gyro_y = Wire.read() << 8 | Wire.read(); // reading registers: 0x45 (GYRO_YOUT_H) and 0x46 (GYRO_YOUT_L)
+  gyro_z = Wire.read() << 8 | Wire.read(); // reading registers: 0x47 (GYRO_ZOUT_H) and 0x48 (GYRO_ZOUT_L)
+
+  // print out data
+  Serial.print("aX = "); Serial.print(convert_int16_to_str(accelerometer_x));
+  Serial.print(" | aY = "); Serial.print(convert_int16_to_str(accelerometer_y));
+  Serial.print(" | aZ = "); Serial.print(convert_int16_to_str(accelerometer_z));
+  // the following equation was taken from the documentation [MPU-6000/MPU-6050 Register Map and Description, p.30]
+  Serial.print(" | tmp = "); Serial.print(temperature / 340.00 + 36.53);
+  Serial.print(" | gX = "); Serial.print(convert_int16_to_str(gyro_x));
+  Serial.print(" | gY = "); Serial.print(convert_int16_to_str(gyro_y));
+  Serial.print(" | gZ = "); Serial.print(convert_int16_to_str(gyro_z));
+  Serial.println();
+
+  if (accelerometer_x > 1000 && accelerometer_y < -8000) {
+    digitalWrite(LED_BL, HIGH);
+    digitalWrite(LED_BR, HIGH);
+    digitalWrite(LED_TL, LOW);
+    digitalWrite(LED_TR, LOW);
+
+    display.clearDisplay();
+    display.setCursor(0, 10);                  //Oled display, just playing with text size and cursor to get the display you want
+    display.setTextColor(WHITE);
+    display.setTextSize(2);
+    display.print("Lift");
+    display.setCursor(0, 30);
+    display.print("Top");
+
+    Blynk.virtualWrite(V5, "lift top");
+  } else if (accelerometer_x > 1000 && accelerometer_y > 8000) {
+    digitalWrite(LED_BL, LOW);
+    digitalWrite(LED_BR, LOW);
+    digitalWrite(LED_TL, HIGH);
+    digitalWrite(LED_TR, HIGH);
+
+    display.clearDisplay();
+    display.setCursor(0, 10);                  //Oled display, just playing with text size and cursor to get the display you want
+    display.setTextColor(WHITE);
+    display.setTextSize(2);
+    display.print("Lift");
+    display.setCursor(0, 30);
+    display.print("Bottom");
+
+    Blynk.virtualWrite(V5, "lift bottom");
+  } else if (accelerometer_x < -6000 && accelerometer_y > -1000) {
+    digitalWrite(LED_BL, HIGH);
+    digitalWrite(LED_BR, LOW);
+    digitalWrite(LED_TL, HIGH);
+    digitalWrite(LED_TR, LOW);
+
+    display.clearDisplay();
+    display.setCursor(0, 10);                  //Oled display, just playing with text size and cursor to get the display you want
+    display.setTextColor(WHITE);
+    display.setTextSize(2);
+    display.print("Lift");
+    display.setCursor(0, 30);
+    display.print("Right Side");
+
+    Blynk.virtualWrite(V5, "lift right");
+
+  } else if (accelerometer_x > 6000 && accelerometer_y > -1000) {
+    digitalWrite(LED_BL, LOW);
+    digitalWrite(LED_BR, HIGH);
+    digitalWrite(LED_TL, LOW);
+    digitalWrite(LED_TR, HIGH);
+
+    display.clearDisplay();
+    display.setCursor(0, 10);                  //Oled display, just playing with text size and cursor to get the display you want
+    display.setTextColor(WHITE);
+    display.setTextSize(2);
+    display.print("Lift");
+    display.setCursor(0, 30);
+    display.print("Left Side");
+
+    Blynk.virtualWrite(V5, "lift left");
+  } else {
+    digitalWrite(LED_BL, LOW);
+    digitalWrite(LED_BR, LOW);
+    digitalWrite(LED_TL, LOW);
+    digitalWrite(LED_TR, LOW);
+
+    display.clearDisplay();
+    display.setCursor(0, 10);                  //Oled display, just playing with text size and cursor to get the display you want
+    display.setTextColor(WHITE);
+    display.setTextSize(2);
+    display.print("You are");
+    display.setCursor(0, 30);
+    display.print("LEVEL!");
+
+    Blynk.virtualWrite(V5, "LEVEL");
+  }
+  Blynk.virtualWrite(V4, accelerometer_x);
+  Blynk.virtualWrite(V3, accelerometer_y);
+
+  display.setTextSize(1);
+  display.setCursor(0, 49);
+  display.print("X: ");
+  display.setCursor(10, 49);
+  display.print(accelerometer_x);
+  display.setCursor(90, 49);
+  display.print("Y: ");
+  display.setCursor(100, 49);
+  display.print(accelerometer_y);
+  display.display();
+
+  Blynk.run();
+  // delay
+  delay(1000);
+}
